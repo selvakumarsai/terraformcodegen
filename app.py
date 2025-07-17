@@ -11,8 +11,8 @@ from pathlib import Path
 
 # --- App Title and Description ---
 st.set_page_config(layout="wide")
-st.title("☁️ Terraform Assistant for Streamlit Cloud")
-st.write("Describe your cloud infrastructure for AWS or Azure, and the AI will generate, validate, correct, and plan the Terraform code for you. This app is ready for deployment on Streamlit Community Cloud.")
+st.title("☁️ Terraform Code Assistant")
+st.write("Describe your cloud infrastructure for AWS or Azure, and the AI will generate, validate, and correct the Terraform code for you. This app is ready for deployment on Streamlit Community Cloud.")
 
 # --- Helper Function to Setup Terraform ---
 @st.cache_resource
@@ -23,10 +23,8 @@ def get_terraform_executable(version="1.8.5"):
     It does NOT contain any Streamlit UI calls.
     Returns the absolute path to the executable or raises an exception.
     """
-    # *** FIX STARTS HERE ***
     # Use .resolve() to ensure the path is absolute, which is more robust in cloud environments.
     terraform_dir = Path(f"./terraform_{version}").resolve()
-    # *** FIX ENDS HERE ***
     terraform_exe = terraform_dir / "terraform"
 
     if not terraform_exe.is_file():
@@ -108,7 +106,6 @@ with st.sidebar:
     4.  Click **Generate with AI**.
     5.  Click **Validate** to check the code.
     6.  If errors exist, click **Correct with AI**.
-    7.  Once valid, review the **Terraform Plan**.
     """)
 
 # --- Initialize Session State ---
@@ -116,8 +113,6 @@ if 'terraform_code' not in st.session_state:
     st.session_state.terraform_code = f'# Describe your {cloud_provider} infrastructure above and click "Generate with AI"'
 if 'validation_result' not in st.session_state:
     st.session_state.validation_result = ""
-if 'plan_output' not in st.session_state:
-    st.session_state.plan_output = ""
 if 'has_errors' not in st.session_state:
     st.session_state.has_errors = False
 if 'validated' not in st.session_state:
@@ -162,7 +157,7 @@ with btn_col1:
                     response_content = completion.choices[0].message.content
                     code_match = re.search(r'```hcl\n(.*?)\n```', response_content, re.DOTALL)
                     st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
-                    st.session_state.validation_result, st.session_state.plan_output, st.session_state.has_errors, st.session_state.validated = "", "", False, False
+                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
                 except Exception as e:
@@ -178,26 +173,27 @@ with btn_col2:
                 get_terraform_executable.clear()
             st.rerun()
         else:
-            st.session_state.validated, st.session_state.plan_output = True, ""
+            st.session_state.validated = True
             temp_dir = "terraform_project"
             os.makedirs(temp_dir, exist_ok=True)
             with open(os.path.join(temp_dir, "main.tf"), "w") as f:
                 f.write(st.session_state.terraform_code)
             
             with st.spinner("Running `terraform init` and `validate`..."):
-                try:
-                    subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True, check=True)
+                init_process = subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True)
+                
+                if init_process.returncode != 0:
+                     st.session_state.validation_result = f"An error occurred during `terraform init`:\n{init_process.stderr}"
+                     st.session_state.has_errors = True
+                else:
                     validate_process = subprocess.run([terraform_executable_path, "validate", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
                     
                     if validate_process.returncode == 0:
-                        st.session_state.validation_result, st.session_state.has_errors = "✅ Validation Successful: The configuration is valid.", False
-                        with st.spinner("Validation successful. Running `terraform plan`..."):
-                            plan_process = subprocess.run([terraform_executable_path, "plan", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
-                            st.session_state.plan_output = plan_process.stdout + "\n" + plan_process.stderr
+                        st.session_state.validation_result = "✅ Validation Successful: The configuration is valid."
+                        st.session_state.has_errors = False
                     else:
-                        st.session_state.validation_result, st.session_state.has_errors = validate_process.stderr, True
-                except subprocess.CalledProcessError as e:
-                    st.session_state.validation_result, st.session_state.has_errors = f"An error occurred during `terraform init`:\n{e.stderr}", True
+                        st.session_state.validation_result = validate_process.stderr
+                        st.session_state.has_errors = True
 
 with btn_col3:
     correct_errors_disabled = not (st.session_state.validated and st.session_state.has_errors)
@@ -235,10 +231,5 @@ with col_results:
             st.write("`<validation_result>`")
             st.code(st.session_state.validation_result, language="bash")
             st.write("`</validation_result>`")
-            if st.session_state.plan_output:
-                st.subheader("Terraform Plan")
-                st.write("`<plan_output>`")
-                st.code(st.session_state.plan_output, language="hcl")
-                st.write("`</plan_output>`")
     else:
-        st.info("Generate and validate code to see the results and plan here.")
+        st.info("Generate and validate code to see the results here.")
