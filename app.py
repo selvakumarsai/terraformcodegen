@@ -167,8 +167,15 @@ with btn_col1:
             st.rerun()
 
 with btn_col2:
-    validate_disabled = not st.session_state.terraform_code or st.session_state.terraform_code.startswith('#') or not terraform_executable_path
+    validate_disabled = not st.session_state.terraform_code or st.session_state.terraform_code.startswith('#')
     if st.button("✅ Validate", disabled=validate_disabled, use_container_width=True):
+        # *** FIX STARTS HERE ***
+        # Add an explicit check to ensure the Terraform executable path is valid before proceeding.
+        if not terraform_executable_path:
+            st.error("Terraform executable not found. The app could not download or configure Terraform. Please check the logs above and try refreshing the page.")
+            st.stop()
+        # *** FIX ENDS HERE ***
+
         st.session_state.validated, st.session_state.plan_output = True, ""
         temp_dir = "terraform_project"
         os.makedirs(temp_dir, exist_ok=True)
