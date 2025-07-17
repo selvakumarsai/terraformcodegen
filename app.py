@@ -16,16 +16,17 @@ st.write("Describe your cloud infrastructure for AWS or Azure, and the AI will g
 
 # --- Helper Function to Setup Terraform ---
 @st.cache_resource
-def setup_terraform(version="1.8.5"):
+def get_terraform_executable(version="1.8.5"):
     """
-    Downloads and sets up a specific version of Terraform in the Streamlit environment.
-    Caches the result to avoid re-downloading on every script rerun.
+    Downloads and prepares a specific version of Terraform.
+    This function's output is cached to avoid re-downloading.
+    It does NOT contain any Streamlit UI calls.
+    Returns the path to the executable or raises an exception.
     """
     terraform_dir = Path(f"./terraform_{version}")
     terraform_exe = terraform_dir / "terraform"
 
     if not terraform_exe.exists():
-        st.toast(f"Terraform v{version} not found. Downloading...")
         system = platform.system().lower()
         arch = platform.machine().lower()
 
@@ -36,43 +37,50 @@ def setup_terraform(version="1.8.5"):
 
         url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
         
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-            
-            terraform_dir.mkdir(exist_ok=True)
-            zip_path = terraform_dir / "terraform.zip"
-            
-            with open(zip_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(terraform_dir)
-            
-            zip_path.unlink() # Clean up the zip file
-            
-            # Make the terraform binary executable
-            st_mode = terraform_exe.stat().st_mode
-            terraform_exe.chmod(st_mode | stat.S_IEXEC)
-            st.toast("✅ Terraform downloaded successfully!")
-        except requests.exceptions.RequestException as e:
-            st.error(f"Failed to download Terraform: {e}")
-            return None
-        except Exception as e:
-            st.error(f"An error occurred during Terraform setup: {e}")
-            return None
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        terraform_dir.mkdir(exist_ok=True)
+        zip_path = terraform_dir / "terraform.zip"
+        
+        with open(zip_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(terraform_dir)
+        
+        zip_path.unlink() # Clean up the zip file
+        
+        # Make the terraform binary executable
+        st_mode = terraform_exe.stat().st_mode
+        terraform_exe.chmod(st_mode | stat.S_IEXEC)
             
     return str(terraform_exe)
 
 # --- Main App Logic ---
-# Add a comment for the user about requirements.txt
+# This wrapper function calls the cached function and handles UI messages.
+def setup_terraform_and_show_status():
+    """
+    Ensures Terraform is set up and shows status messages to the user.
+    """
+    try:
+        path = get_terraform_executable()
+        # A one-time toast message can be shown if we use a session_state flag
+        if 'terraform_toast_shown' not in st.session_state:
+            st.toast("✅ Terraform is ready!")
+            st.session_state.terraform_toast_shown = True
+        return path
+    except Exception as e:
+        st.error(f"Failed to set up Terraform: {e}")
+        return None
+
 # For deployment, you will need a requirements.txt file with the following content:
 # streamlit
 # openai
 # requests
 
-terraform_executable_path = setup_terraform()
+terraform_executable_path = setup_terraform_and_show_status()
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
