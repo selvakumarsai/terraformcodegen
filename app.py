@@ -12,7 +12,7 @@ from pathlib import Path
 # --- App Title and Description ---
 st.set_page_config(layout="wide")
 st.title("☁️ Terraform Code Assistant")
-st.write("Describe your cloud infrastructure for AWS or Azure, and the AI will generate, validate, and correct the Terraform code for you. This app is ready for deployment on Streamlit Community Cloud.")
+st.write("Describe your cloud infrastructure for AWS, Azure, or Google Cloud, and the AI will generate, validate, and correct the Terraform code for you. This app is ready for deployment on Streamlit Community Cloud.")
 
 # --- Helper Function to Setup Terraform ---
 @st.cache_resource
@@ -86,7 +86,7 @@ terraform_executable_path = setup_terraform_and_show_status()
 # --- Sidebar for Configuration ---
 with st.sidebar:
     st.header("Configuration")
-    cloud_provider = st.selectbox("Select Cloud Provider", ["AWS", "Azure"])
+    cloud_provider = st.selectbox("Select Cloud Provider", ["AWS", "Azure", "Google"])
     
     # Check for API key in st.secrets. No manual fallback.
     openai_api_key = None
@@ -100,7 +100,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("How to use:")
     st.markdown("""
-    1.  Select your cloud provider (AWS/Azure).
+    1.  Select your cloud provider.
     2.  Ensure your OpenAI API key is set in the app's secrets.
     3.  Describe the resources you want in the text box.
     4.  Click **Generate with AI**.
@@ -123,7 +123,13 @@ col_editor, col_results = st.columns(2)
 
 with col_editor:
     st.header("Your Infrastructure Request")
-    user_prompt = st.text_input("Describe the resources you want to create:", "An S3 bucket for logging and a t3.small EC2 instance")
+    
+    example_prompts = {
+        "AWS": "An S3 bucket for logging and a t3.small EC2 instance",
+        "Azure": "An Azure Storage Account and a Standard_B1s virtual machine",
+        "Google": "A Google Cloud Storage bucket and an e2-micro compute engine instance"
+    }
+    user_prompt = st.text_input("Describe the resources you want to create:", example_prompts[cloud_provider])
 
     st.header("Terraform Code")
     st.session_state.terraform_code = st.text_area(
@@ -151,7 +157,10 @@ with btn_col1:
                     Generate a complete, valid, and secure Terraform HCL configuration based on the user's request.
                     The configuration must be a single block of HCL code.
                     Do not include any explanations, markdown, or text outside of the code block.
-                    Use appropriate resource names and tags. For AWS, default to 'us-east-1' region. For Azure, include a resource group.
+                    Use appropriate resource names and tags.
+                    - For AWS, default to 'us-east-1' region.
+                    - For Azure, include a resource group.
+                    - For Google, include a project and default to 'us-central1' region.
                     """
                     completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
                     response_content = completion.choices[0].message.content
