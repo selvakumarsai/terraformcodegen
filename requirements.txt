@@ -1,0 +1,7 @@
+subprocess
+re
+openai
+equests
+zipfile
+platform
+stat
