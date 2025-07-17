@@ -1,0 +1,226 @@
+import streamlit as st
+import subprocess
+import os
+import re
+import openai
+import requests
+import zipfile
+import platform
+import stat
+from pathlib import Path
+
+# --- App Title and Description ---
+st.set_page_config(layout="wide")
+st.title("☁️ Terraform Assistant for Streamlit Cloud")
+st.write("Describe your cloud infrastructure for AWS or Azure, and the AI will generate, validate, correct, and plan the Terraform code for you. This app is ready for deployment on Streamlit Community Cloud.")
+
+# --- Helper Function to Setup Terraform ---
+@st.cache_resource
+def setup_terraform(version="1.8.5"):
+    """
+    Downloads and sets up a specific version of Terraform in the Streamlit environment.
+    Caches the result to avoid re-downloading on every script rerun.
+    """
+    terraform_dir = Path(f"./terraform_{version}")
+    terraform_exe = terraform_dir / "terraform"
+
+    if not terraform_exe.exists():
+        st.toast(f"Terraform v{version} not found. Downloading...")
+        system = platform.system().lower()
+        arch = platform.machine().lower()
+
+        if arch == "x86_64":
+            arch = "amd64"
+        elif arch == "aarch64":
+            arch = "arm64"
+
+        url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
+        
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            terraform_dir.mkdir(exist_ok=True)
+            zip_path = terraform_dir / "terraform.zip"
+            
+            with open(zip_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(terraform_dir)
+            
+            zip_path.unlink() # Clean up the zip file
+            
+            # Make the terraform binary executable
+            st_mode = terraform_exe.stat().st_mode
+            terraform_exe.chmod(st_mode | stat.S_IEXEC)
+            st.toast("✅ Terraform downloaded successfully!")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Failed to download Terraform: {e}")
+            return None
+        except Exception as e:
+            st.error(f"An error occurred during Terraform setup: {e}")
+            return None
+            
+    return str(terraform_exe)
+
+# --- Main App Logic ---
+# Add a comment for the user about requirements.txt
+# For deployment, you will need a requirements.txt file with the following content:
+# streamlit
+# openai
+# requests
+
+terraform_executable_path = setup_terraform()
+
+# --- Sidebar for Configuration ---
+with st.sidebar:
+    st.header("Configuration")
+    cloud_provider = st.selectbox("Select Cloud Provider", ["AWS", "Azure"])
+    
+    # Check for API key in st.secrets first, then fall back to manual input
+    try:
+        openai_api_key = st.secrets["OPENAI_API_KEY"]
+        st.success("OpenAI API key loaded from secrets!")
+    except (FileNotFoundError, KeyError):
+        st.info("For deployment, add your OpenAI API key to your Streamlit app's secrets. Name it `OPENAI_API_KEY`.")
+        openai_api_key = st.text_input("Enter your OpenAI API Key", type="password")
+
+    st.markdown("---")
+    st.subheader("How to use:")
+    st.markdown("""
+    1.  Select your cloud provider (AWS/Azure).
+    2.  Provide your OpenAI API key (via secrets or text input).
+    3.  Describe the resources you want in the text box.
+    4.  Click **Generate with AI**.
+    5.  Click **Validate** to check the code.
+    6.  If errors exist, click **Correct with AI**.
+    7.  Once valid, review the **Terraform Plan**.
+    """)
+
+# --- Initialize Session State ---
+if 'terraform_code' not in st.session_state:
+    st.session_state.terraform_code = f'# Describe your {cloud_provider} infrastructure above and click "Generate with AI"'
+if 'validation_result' not in st.session_state:
+    st.session_state.validation_result = ""
+if 'plan_output' not in st.session_state:
+    st.session_state.plan_output = ""
+if 'has_errors' not in st.session_state:
+    st.session_state.has_errors = False
+if 'validated' not in st.session_state:
+    st.session_state.validated = False
+
+# --- Main App Layout ---
+col_editor, col_results = st.columns(2)
+
+with col_editor:
+    st.header("Your Infrastructure Request")
+    user_prompt = st.text_input("Describe the resources you want to create:", "An S3 bucket for logging and a t3.small EC2 instance")
+
+    st.header("Terraform Code")
+    st.session_state.terraform_code = st.text_area(
+        "Terraform HCL Code:",
+        value=st.session_state.terraform_code,
+        height=500,
+        key="code_editor"
+    )
+
+# --- Action Buttons ---
+btn_col1, btn_col2, btn_col3 = st.columns(3)
+
+with btn_col1:
+    if st.button("🚀 Generate with AI", use_container_width=True, type="primary"):
+        if not openai_api_key:
+            st.error("Please enter your OpenAI API key in the sidebar.")
+        elif not user_prompt:
+            st.warning("Please describe the infrastructure you want to generate.")
+        else:
+            with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
+                try:
+                    client = openai.OpenAI(api_key=openai_api_key)
+                    system_prompt = f"""
+                    You are a Terraform code generation expert for {cloud_provider}.
+                    Generate a complete, valid, and secure Terraform HCL configuration based on the user's request.
+                    The configuration must be a single block of HCL code.
+                    Do not include any explanations, markdown, or text outside of the code block.
+                    Use appropriate resource names and tags. For AWS, default to 'us-east-1' region. For Azure, include a resource group.
+                    """
+                    completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
+                    response_content = completion.choices[0].message.content
+                    code_match = re.search(r'```hcl\n(.*?)\n```', response_content, re.DOTALL)
+                    st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
+                    st.session_state.validation_result, st.session_state.plan_output, st.session_state.has_errors, st.session_state.validated = "", "", False, False
+                except openai.AuthenticationError:
+                    st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
+                except Exception as e:
+                    st.error(f"An error occurred while communicating with OpenAI: {e}")
+            st.rerun()
+
+with btn_col2:
+    validate_disabled = not st.session_state.terraform_code or st.session_state.terraform_code.startswith('#') or not terraform_executable_path
+    if st.button("✅ Validate", disabled=validate_disabled, use_container_width=True):
+        st.session_state.validated, st.session_state.plan_output = True, ""
+        temp_dir = "terraform_project"
+        os.makedirs(temp_dir, exist_ok=True)
+        with open(os.path.join(temp_dir, "main.tf"), "w") as f:
+            f.write(st.session_state.terraform_code)
+        
+        with st.spinner("Running `terraform init` and `validate`..."):
+            try:
+                subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True, check=True)
+                validate_process = subprocess.run([terraform_executable_path, "validate", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
+                
+                if validate_process.returncode == 0:
+                    st.session_state.validation_result, st.session_state.has_errors = "✅ Validation Successful: The configuration is valid.", False
+                    with st.spinner("Validation successful. Running `terraform plan`..."):
+                        plan_process = subprocess.run([terraform_executable_path, "plan", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
+                        st.session_state.plan_output = plan_process.stdout + "\n" + plan_process.stderr
+                else:
+                    st.session_state.validation_result, st.session_state.has_errors = validate_process.stderr, True
+            except subprocess.CalledProcessError as e:
+                st.session_state.validation_result, st.session_state.has_errors = f"An error occurred during `terraform init`:\n{e.stderr}", True
+
+with btn_col3:
+    correct_errors_disabled = not (st.session_state.validated and st.session_state.has_errors)
+    if st.button("🛠️ Correct with AI", disabled=correct_errors_disabled, use_container_width=True):
+        if not openai_api_key:
+            st.error("Please enter your OpenAI API key to use the correction feature.")
+        else:
+            with st.spinner("AI is attempting to correct the code..."):
+                try:
+                    client = openai.OpenAI(api_key=openai_api_key)
+                    system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
+                    correction_prompt = f"**Terraform Code with Errors:**\n```hcl\n{st.session_state.terraform_code}\n```\n\n**Validation Error:**\n```\n{st.session_state.validation_result}\n```\nPlease provide the corrected code."
+                    completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": correction_prompt}])
+                    response_content = completion.choices[0].message.content
+                    code_match = re.search(r'```hcl\n(.*?)\n```', response_content, re.DOTALL)
+                    st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
+                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "🔧 AI has attempted to correct the code. Please validate again.", False, False
+                except openai.AuthenticationError:
+                    st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
+                except Exception as e:
+                    st.error(f"An error occurred during correction: {e}")
+            st.rerun()
+
+# --- Display Results Area ---
+with col_results:
+    st.header("Results")
+    if st.session_state.validated:
+        if st.session_state.has_errors:
+            st.error("Validation Failed!")
+            st.write("`<validation_result>`")
+            st.code(st.session_state.validation_result, language="bash")
+            st.write("`</validation_result>`")
+        else:
+            st.success("Validation Successful!")
+            st.write("`<validation_result>`")
+            st.code(st.session_state.validation_result, language="bash")
+            st.write("`</validation_result>`")
+            if st.session_state.plan_output:
+                st.subheader("Terraform Plan")
+                st.write("`<plan_output>`")
+                st.code(st.session_state.plan_output, language="hcl")
+                st.write("`</plan_output>`")
+    else:
+        st.info("Generate and validate code to see the results and plan here.")
