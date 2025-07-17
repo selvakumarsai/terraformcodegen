@@ -170,10 +170,14 @@ with btn_col2:
     validate_disabled = not st.session_state.terraform_code or st.session_state.terraform_code.startswith('#')
     if st.button("✅ Validate", disabled=validate_disabled, use_container_width=True):
         # *** FIX STARTS HERE ***
-        # Add an explicit check to ensure the Terraform executable path is valid before proceeding.
-        if not terraform_executable_path:
-            st.error("Terraform executable not found. The app could not download or configure Terraform. Please check the logs above and try refreshing the page.")
-            st.stop()
+        # Add a more robust check to verify the executable exists before trying to use it.
+        # This handles cases where the file might be missing in an ephemeral cloud filesystem.
+        if not terraform_executable_path or not Path(terraform_executable_path).is_file():
+            st.error("Terraform executable is not available. Attempting to re-initialize...")
+            with st.spinner("Setting up Terraform again..."):
+                # Clear the cache and rerun the script to force a re-download.
+                get_terraform_executable.clear()
+            st.rerun()
         # *** FIX ENDS HERE ***
 
         st.session_state.validated, st.session_state.plan_output = True, ""
