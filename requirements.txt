@@ -1,6 +1,5 @@
-re
 openai
-equests
+requests
 zipfile
 platform
 stat
