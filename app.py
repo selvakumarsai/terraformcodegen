@@ -87,19 +87,20 @@ with st.sidebar:
     st.header("Configuration")
     cloud_provider = st.selectbox("Select Cloud Provider", ["AWS", "Azure"])
     
-    # Check for API key in st.secrets first, then fall back to manual input
+    # Check for API key in st.secrets. No manual fallback.
+    openai_api_key = None
     try:
         openai_api_key = st.secrets["OPENAI_API_KEY"]
         st.success("OpenAI API key loaded from secrets!")
     except (FileNotFoundError, KeyError):
-        st.info("For deployment, add your OpenAI API key to your Streamlit app's secrets. Name it `OPENAI_API_KEY`.")
-        openai_api_key = st.text_input("Enter your OpenAI API Key", type="password")
+        st.error("OpenAI API key not found!")
+        st.info("Please add your OpenAI API key to your Streamlit app's secrets. In your app dashboard, go to Settings > Secrets and add a key named `OPENAI_API_KEY`.")
 
     st.markdown("---")
     st.subheader("How to use:")
     st.markdown("""
     1.  Select your cloud provider (AWS/Azure).
-    2.  Provide your OpenAI API key (via secrets or text input).
+    2.  Ensure your OpenAI API key is set in the app's secrets.
     3.  Describe the resources you want in the text box.
     4.  Click **Generate with AI**.
     5.  Click **Validate** to check the code.
@@ -140,7 +141,7 @@ btn_col1, btn_col2, btn_col3 = st.columns(3)
 with btn_col1:
     if st.button("🚀 Generate with AI", use_container_width=True, type="primary"):
         if not openai_api_key:
-            st.error("Please enter your OpenAI API key in the sidebar.")
+            st.error("Cannot generate code. Please configure your OpenAI API key in the app secrets.")
         elif not user_prompt:
             st.warning("Please describe the infrastructure you want to generate.")
         else:
@@ -193,7 +194,7 @@ with btn_col3:
     correct_errors_disabled = not (st.session_state.validated and st.session_state.has_errors)
     if st.button("🛠️ Correct with AI", disabled=correct_errors_disabled, use_container_width=True):
         if not openai_api_key:
-            st.error("Please enter your OpenAI API key to use the correction feature.")
+            st.error("Cannot correct code. Please configure your OpenAI API key in the app secrets.")
         else:
             with st.spinner("AI is attempting to correct the code..."):
                 try:
