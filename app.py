@@ -18,15 +18,18 @@ st.write("Describe your cloud infrastructure for AWS or Azure, and the AI will g
 @st.cache_resource
 def get_terraform_executable(version="1.8.5"):
     """
-    Downloads and prepares a specific version of Terraform.
+    Downloads and prepares a specific version of Terraform, returning an absolute path.
     This function's output is cached to avoid re-downloading.
     It does NOT contain any Streamlit UI calls.
-    Returns the path to the executable or raises an exception.
+    Returns the absolute path to the executable or raises an exception.
     """
-    terraform_dir = Path(f"./terraform_{version}")
+    # *** FIX STARTS HERE ***
+    # Use .resolve() to ensure the path is absolute, which is more robust in cloud environments.
+    terraform_dir = Path(f"./terraform_{version}").resolve()
+    # *** FIX ENDS HERE ***
     terraform_exe = terraform_dir / "terraform"
 
-    if not terraform_exe.exists():
+    if not terraform_exe.is_file():
         system = platform.system().lower()
         arch = platform.machine().lower()
 
@@ -169,37 +172,32 @@ with btn_col1:
 with btn_col2:
     validate_disabled = not st.session_state.terraform_code or st.session_state.terraform_code.startswith('#')
     if st.button("✅ Validate", disabled=validate_disabled, use_container_width=True):
-        # *** FIX STARTS HERE ***
-        # Add a more robust check to verify the executable exists before trying to use it.
-        # This handles cases where the file might be missing in an ephemeral cloud filesystem.
         if not terraform_executable_path or not Path(terraform_executable_path).is_file():
             st.error("Terraform executable is not available. Attempting to re-initialize...")
             with st.spinner("Setting up Terraform again..."):
-                # Clear the cache and rerun the script to force a re-download.
                 get_terraform_executable.clear()
             st.rerun()
-        # *** FIX ENDS HERE ***
-
-        st.session_state.validated, st.session_state.plan_output = True, ""
-        temp_dir = "terraform_project"
-        os.makedirs(temp_dir, exist_ok=True)
-        with open(os.path.join(temp_dir, "main.tf"), "w") as f:
-            f.write(st.session_state.terraform_code)
-        
-        with st.spinner("Running `terraform init` and `validate`..."):
-            try:
-                subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True, check=True)
-                validate_process = subprocess.run([terraform_executable_path, "validate", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
-                
-                if validate_process.returncode == 0:
-                    st.session_state.validation_result, st.session_state.has_errors = "✅ Validation Successful: The configuration is valid.", False
-                    with st.spinner("Validation successful. Running `terraform plan`..."):
-                        plan_process = subprocess.run([terraform_executable_path, "plan", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
-                        st.session_state.plan_output = plan_process.stdout + "\n" + plan_process.stderr
-                else:
-                    st.session_state.validation_result, st.session_state.has_errors = validate_process.stderr, True
-            except subprocess.CalledProcessError as e:
-                st.session_state.validation_result, st.session_state.has_errors = f"An error occurred during `terraform init`:\n{e.stderr}", True
+        else:
+            st.session_state.validated, st.session_state.plan_output = True, ""
+            temp_dir = "terraform_project"
+            os.makedirs(temp_dir, exist_ok=True)
+            with open(os.path.join(temp_dir, "main.tf"), "w") as f:
+                f.write(st.session_state.terraform_code)
+            
+            with st.spinner("Running `terraform init` and `validate`..."):
+                try:
+                    subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True, check=True)
+                    validate_process = subprocess.run([terraform_executable_path, "validate", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
+                    
+                    if validate_process.returncode == 0:
+                        st.session_state.validation_result, st.session_state.has_errors = "✅ Validation Successful: The configuration is valid.", False
+                        with st.spinner("Validation successful. Running `terraform plan`..."):
+                            plan_process = subprocess.run([terraform_executable_path, "plan", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
+                            st.session_state.plan_output = plan_process.stdout + "\n" + plan_process.stderr
+                    else:
+                        st.session_state.validation_result, st.session_state.has_errors = validate_process.stderr, True
+                except subprocess.CalledProcessError as e:
+                    st.session_state.validation_result, st.session_state.has_errors = f"An error occurred during `terraform init`:\n{e.stderr}", True
 
 with btn_col3:
     correct_errors_disabled = not (st.session_state.validated and st.session_state.has_errors)
