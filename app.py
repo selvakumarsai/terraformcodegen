@@ -163,17 +163,41 @@ with btn_col1:
                     - For Google, include a project and default to 'us-central1' region.
                     """
                     completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
-                    response_content = completion.choices[0].message.content
                     
-                    # --- FIX APPLIED HERE ---
+                    # --- DEBUGGING STEP 1: Check for successful response content ---
+                    if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
+                        st.error("API Error: Received an empty or malformed response from the OpenAI API.")
+                        response_content = ""
+                    else:
+                        response_content = completion.choices[0].message.content
+                    
+                    st.subheader("Raw AI Response (for debugging):")
+                    st.code(response_content, language="markdown")
+                    # --- END DEBUGGING STEP 1 ---
+                    
                     # Use a more forgiving regex to capture the code block content, 
                     # regardless of the language specifier (e.g., hcl, terraform, or empty).
                     code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
-                    # If a code block is found, use its content; otherwise, use the entire response.
-                    st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
-                    # --- END FIX ---
                     
-                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
+                    if code_match:
+                        # If a code block is found, use its captured content.
+                        st.session_state.terraform_code = code_match.group(1).strip()
+                        st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
+                    elif response_content:
+                        # Fallback: If content exists but no code block was detected, try to strip fences
+                        # and warn the user that the AI did not format correctly.
+                        cleaned_content = response_content.strip()
+                        cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
+                        cleaned_content = re.sub(r'```$', '', cleaned_content)
+                        st.session_state.terraform_code = cleaned_content.strip()
+                        st.warning("⚠️ The AI response did not contain a standard markdown code block. Using the raw output.")
+                        st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
+                    else:
+                        st.session_state.terraform_code = "# AI returned no content."
+                        st.session_state.validation_result = "Failed to generate code."
+                        st.session_state.has_errors = True
+                        st.session_state.validated = False
+
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
                 except Exception as e:
@@ -223,7 +247,7 @@ with btn_col3:
                 try:
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
-                    # FIX: Changed to triple quotes for a multi-line f-string.
+                    # Using triple quotes for multi-line f-string.
                     correction_prompt = f"""**Terraform Code with Errors:**
 ```hcl
 {st.session_state.terraform_code}
@@ -236,12 +260,25 @@ with btn_col3:
 Please provide the corrected code."""
                     
                     completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": correction_prompt}])
-                    response_content = completion.choices[0].message.content
                     
-                    # --- FIX APPLIED HERE ---
+                    if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
+                        st.error("API Error: Received an empty or malformed response from the OpenAI API during correction.")
+                        response_content = ""
+                    else:
+                        response_content = completion.choices[0].message.content
+                    
+                    # Use a more forgiving regex to capture the code block content
                     code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
-                    st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
-                    # --- END FIX ---
+                    
+                    if code_match:
+                        st.session_state.terraform_code = code_match.group(1).strip()
+                    else:
+                        # Fallback: Use the entire response, but try to strip common fences
+                        cleaned_content = response_content.strip()
+                        cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
+                        cleaned_content = re.sub(r'```$', '', cleaned_content)
+                        st.session_state.terraform_code = cleaned_content.strip()
+                        st.warning("⚠️ The AI response did not contain a standard markdown code block. Using the raw output.")
                     
                     st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "🔧 AI has attempted to correct the code. Please validate again.", False, False
                 except openai.AuthenticationError:
