@@ -104,8 +104,7 @@ if 'has_errors' not in st.session_state:
     st.session_state.has_errors = False
 if 'validated' not in st.session_state:
     st.session_state.validated = False
-if 'raw_api_dump' not in st.session_state:
-    st.session_state.raw_api_dump = ""
+# Removed 'raw_api_dump' session state
 
 # --- Sidebar ---
 with st.sidebar:
@@ -141,12 +140,12 @@ with col_editor:
     }
     user_prompt = st.text_input("Describe the resources you want to create:", example_prompts[cloud_provider])
 
-    st.header("Terraform Code")
-    st.session_state.terraform_code = st.text_area(
-        "Terraform HCL Code:",
-        value=st.session_state.terraform_code,
-        height=500,
-        key="code_editor"
+    st.header("Generated Terraform Code")
+    # REPLACED st.text_area with st.code for read-only display
+    st.code(
+        st.session_state.terraform_code,
+        language="hcl",
+        line_numbers=True
     )
 
 # --- Utility Function for Code Extraction ---
@@ -191,7 +190,6 @@ with btn_col1:
             with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
                 clean_prompt = sanitize_text(user_prompt)
                 response_content = ""
-                # Removed setting of st.session_state.raw_api_dump here
                 try:
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = f"""
@@ -216,7 +214,6 @@ with btn_col1:
                                 ]
                             )
                             response_content = completion.choices[0].message.content
-                            # Removed setting of st.session_state.raw_api_dump here
                             break # Success, exit retry loop
                         except Exception as e:
                             if i < 2:
