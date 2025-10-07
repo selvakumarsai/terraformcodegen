@@ -155,6 +155,9 @@ with btn_col1:
         else:
             with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
                 try:
+                    # --- FIX: Sanitize prompt to remove non-ASCII 'smart quotes' that cause encoding errors ---
+                    sanitized_prompt = user_prompt.replace('“', '"').replace('”', '"').replace('’', "'").replace('—', '-')
+                    
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = f"""
                     You are a Terraform code generation expert for {cloud_provider}.
@@ -166,7 +169,13 @@ with btn_col1:
                     - For Azure, include a resource group.
                     - For Google, include a project and default to 'us-central1' region.
                     """
-                    completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
+                    completion = client.chat.completions.create(
+                        model="gpt-4o", 
+                        messages=[
+                            {"role": "system", "content": system_prompt}, 
+                            {"role": "user", "content": sanitized_prompt} # Use sanitized prompt
+                        ]
+                    )
                     
                     if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
                         st.error("API Error: Received an empty or malformed response from the OpenAI API.")
@@ -248,17 +257,21 @@ with btn_col3:
         else:
             with st.spinner("AI is attempting to correct the code..."):
                 try:
+                    # --- FIX: Sanitize code content to remove non-ASCII 'smart quotes' that cause encoding errors ---
+                    sanitized_code = st.session_state.terraform_code.replace('“', '"').replace('”', '"').replace('’', "'").replace('—', '-')
+                    sanitized_result = st.session_state.validation_result.replace('“', '"').replace('”', '"').replace('’', "'").replace('—', '-')
+
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
                     # Using triple quotes for multi-line f-string.
                     correction_prompt = f"""**Terraform Code with Errors:**
 ```hcl
-{st.session_state.terraform_code}
+{sanitized_code}
 ```
 
 **Validation Error:**
 ```
-{st.session_state.validation_result}
+{sanitized_result}
 ```
 Please provide the corrected code."""
                     
@@ -294,7 +307,7 @@ Please provide the corrected code."""
 with col_results:
     st.header("Results")
     
-    # NEW: Display raw response for debugging if extraction failed
+    # Display raw response for debugging if extraction failed
     if st.session_state.raw_response_debug:
         st.subheader("⚠️ Raw Debug Response (API Output)")
         st.info("The code box is empty because the AI failed to respond with a usable code block or the API call failed. This is the raw text (or error message) received:")
