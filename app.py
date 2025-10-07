@@ -8,40 +8,35 @@ import zipfile
 import platform
 import stat
 from pathlib import Path
+import time # Added for exponential backoff placeholder
+
+# --- Constants and Configuration ---
+TERRAFORM_VERSION = "1.8.5"
+# Note: OpenAI API key is pulled from st.secrets
 
 # --- Content Sanitization Function ---
-def sanitize_text(text):
+def sanitize_text(text: str) -> str:
     """
     Replaces common Unicode smart quotes and dashes with ASCII equivalents,
-    and then strips any remaining non-ASCII characters to prevent encoding errors.
+    then aggressively strips any remaining non-ASCII characters to ensure
+    compatibility during API communication.
     """
     if not isinstance(text, str):
         return ""
     
-    # 1. Explicitly replace common smart quotes and dashes (fixes the specific error: \u201c)
-    text = text.replace('“', '"').replace('”', '"') # Left/Right double quote
-    text = text.replace('‘', "'").replace('’', "'") # Left/Right single quote (apostrophe)
-    text = text.replace('—', '--').replace('–', '-') # Em dash/En dash
+    # Explicitly replace common smart quotes and dashes (to resolve \u201c error)
+    text = text.replace('“', '"').replace('”', '"')
+    text = text.replace('‘', "'").replace('’', "'")
+    text = text.replace('—', '--').replace('–', '-')
     
-    # 2. Aggressively strip all remaining non-ASCII characters
+    # Aggressively strip all remaining non-ASCII characters
     return text.encode('ascii', 'ignore').decode('ascii')
 
 
-# --- App Title and Description ---
-st.set_page_config(layout="wide")
-st.title("☁️ Terraform Code Assistant")
-st.write("Describe your cloud infrastructure for AWS, Azure, or Google Cloud, and the AI will generate, validate, and correct the Terraform code for you. This app is ready for deployment on Streamlit Community Cloud.")
-
 # --- Helper Function to Setup Terraform ---
 @st.cache_resource
-def get_terraform_executable(version="1.8.5"):
-    """
-    Downloads and prepares a specific version of Terraform, returning an absolute path.
-    This function's output is cached to avoid re-downloading.
-    It does NOT contain any Streamlit UI calls.
-    Returns the absolute path to the executable or raises an exception.
-    """
-    # Use .resolve() to ensure the path is absolute, which is more robust in cloud environments.
+def get_terraform_executable(version=TERRAFORM_VERSION):
+    """Downloads and prepares a specific version of Terraform."""
     terraform_dir = Path(f"./terraform_{version}").resolve()
     terraform_exe = terraform_dir / "terraform"
 
@@ -69,7 +64,7 @@ def get_terraform_executable(version="1.8.5"):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(terraform_dir)
         
-        zip_path.unlink() # Clean up the zip file
+        zip_path.unlink() 
         
         # Make the terraform binary executable
         st_mode = terraform_exe.stat().st_mode
@@ -77,66 +72,58 @@ def get_terraform_executable(version="1.8.5"):
             
     return str(terraform_exe)
 
-# --- Main App Logic ---
-# This wrapper function calls the cached function and handles UI messages.
-def setup_terraform_and_show_status():
-    """
-    Ensures Terraform is set up and shows status messages to the user.
-    """
-    try:
-        path = get_terraform_executable()
-        # A one-time toast message can be shown if we use a session_state flag
-        if 'terraform_toast_shown' not in st.session_state:
-            st.toast("✅ Terraform is ready!")
-            st.session_state.terraform_toast_shown = True
-        return path
-    except Exception as e:
-        st.error(f"Failed to set up Terraform: {e}")
-        return None
+# --- Initialize and Setup ---
+st.set_page_config(layout="wide")
+st.title("☁️ Terraform Code Assistant")
+st.write("Describe your cloud infrastructure for AWS, Azure, or Google Cloud, and the AI will generate, validate, and correct the Terraform code for you.")
 
-# For deployment, you will need a requirements.txt file with the following content:
-# streamlit
-# openai
-# requests
+# Ensure Terraform is ready
+try:
+    terraform_executable_path = get_terraform_executable()
+    if 'terraform_toast_shown' not in st.session_state:
+        st.toast("✅ Terraform is ready!")
+        st.session_state.terraform_toast_shown = True
+except Exception as e:
+    st.error(f"Failed to set up Terraform: {e}")
+    terraform_executable_path = None
 
-terraform_executable_path = setup_terraform_and_show_status()
-
-# --- Sidebar for Configuration ---
-with st.sidebar:
-    st.header("Configuration")
-    cloud_provider = st.selectbox("Select Cloud Provider", ["AWS", "Azure", "Google"])
-    
-    # Check for API key in st.secrets. No manual fallback.
-    openai_api_key = None
-    try:
-        openai_api_key = st.secrets["OPENAI_API_KEY"]
-        st.success("OpenAI API key loaded from secrets!")
-    except (FileNotFoundError, KeyError):
-        st.error("OpenAI API key not found!")
-        st.info("Please add your OpenAI API key to your Streamlit app's secrets. In your app dashboard, go to Settings > Secrets and add a key named `OPENAI_API_KEY`.")
-
-    st.markdown("---")
-    st.subheader("How to use:")
-    st.markdown("""
-    1.  Select your cloud provider.
-    2.  Ensure your OpenAI API key is set in the app's secrets.
-    3.  Describe the resources you want in the text box.
-    4.  Click **Generate with AI**.
-    5.  Click **Validate** to check the code.
-    6.  If errors exist, click **Correct with AI**.
-    """)
+# Check for API key
+openai_api_key = None
+try:
+    openai_api_key = st.secrets["OPENAI_API_KEY"]
+except (FileNotFoundError, KeyError):
+    pass # Handled in sidebar
 
 # --- Initialize Session State ---
 if 'terraform_code' not in st.session_state:
-    st.session_state.terraform_code = f'# Describe your {cloud_provider} infrastructure above and click "Generate with AI"'
+    st.session_state.terraform_code = '# Click "Generate with AI" to start.'
 if 'validation_result' not in st.session_state:
     st.session_state.validation_result = ""
 if 'has_errors' not in st.session_state:
     st.session_state.has_errors = False
 if 'validated' not in st.session_state:
     st.session_state.validated = False
-if 'raw_response_debug' not in st.session_state: # Debug state for raw API response
-    st.session_state.raw_response_debug = ""
+
+# --- Sidebar ---
+with st.sidebar:
+    st.header("Configuration")
+    cloud_provider = st.selectbox("Select Cloud Provider", ["AWS", "Azure", "Google"])
+    
+    if openai_api_key:
+        st.success("OpenAI API key loaded from secrets!")
+    else:
+        st.error("OpenAI API key not found!")
+        st.info("Please add your OpenAI API key to your Streamlit app's secrets.")
+
+    st.markdown("---")
+    st.subheader("How to use:")
+    st.markdown("""
+    1. Select your cloud provider.
+    2. Describe the resources you want to create in the text box.
+    3. Click **Generate with AI**.
+    4. Click **Validate** to check the code syntax.
+    5. If errors exist, click **Correct with AI**.
+    """)
 
 # --- Main App Layout ---
 col_editor, col_results = st.columns(2)
@@ -159,25 +146,40 @@ with col_editor:
         key="code_editor"
     )
 
+# --- Utility Function for Code Extraction ---
+def extract_code_content(response_content: str) -> str:
+    """Extracts code content using a forgiving regex."""
+    code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
+    
+    if code_match:
+        return code_match.group(1).strip()
+    else:
+        # Fallback: Strip fences and use raw content
+        cleaned_content = response_content.strip()
+        cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
+        cleaned_content = re.sub(r'```$', '', cleaned_content)
+        
+        if cleaned_content != response_content.strip():
+            # Only show warning if cleaning actually happened
+            st.warning("⚠️ The AI response was not properly code-fenced. Using raw output.")
+            
+        return cleaned_content.strip()
+
+
 # --- Action Buttons ---
 btn_col1, btn_col2, btn_col3 = st.columns(3)
 
 with btn_col1:
     if st.button("🚀 Generate with AI", use_container_width=True, type="primary"):
-        st.session_state.raw_response_debug = "" # Clear debug flag before new run
-        
         if not openai_api_key:
             st.error("Cannot generate code. Please configure your OpenAI API key in the app secrets.")
         elif not user_prompt:
             st.warning("Please describe the infrastructure you want to generate.")
         else:
             with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
-                # Define clean_prompt outside the try block for error reporting
-                clean_prompt = ""
+                clean_prompt = sanitize_text(user_prompt)
+                response_content = ""
                 try:
-                    # --- SANITIZE USER INPUT HERE ---
-                    clean_prompt = sanitize_text(user_prompt)
-                    
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = f"""
                     You are a Terraform code generation expert for {cloud_provider}.
@@ -189,85 +191,59 @@ with btn_col1:
                     - For Azure, include a resource group.
                     - For Google, include a project and default to 'us-central1' region.
                     """
-                    completion = client.chat.completions.create(
-                        model="gpt-4o", 
-                        messages=[
-                            {"role": "system", "content": system_prompt}, 
-                            {"role": "user", "content": clean_prompt} # Use cleaned prompt
-                        ]
-                    )
                     
-                    if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
-                        st.error("API Error: Received an empty or malformed response from the OpenAI API.")
-                        response_content = ""
-                        st.session_state.raw_response_debug = "API returned an empty or malformed completion object."
+                    # Use a basic retry mechanism (Exponential Backoff placeholder)
+                    for i in range(3):
+                        try:
+                            completion = client.chat.completions.create(
+                                model="gpt-4o", 
+                                messages=[
+                                    {"role": "system", "content": system_prompt}, 
+                                    {"role": "user", "content": clean_prompt}
+                                ]
+                            )
+                            response_content = completion.choices[0].message.content
+                            break # Success, exit retry loop
+                        except Exception:
+                            if i < 2:
+                                time.sleep(2 ** i) # Wait 1s, then 2s
+                            else:
+                                raise # Re-raise error on final attempt
+
+                    if response_content:
+                        st.session_state.terraform_code = extract_code_content(response_content)
                     else:
-                        response_content = completion.choices[0].message.content
+                        st.error("The AI returned an empty response. Please try again.")
+                        st.session_state.terraform_code = "# AI returned no content."
                         
-                    # Use a more forgiving regex to capture the code block content, 
-                    # regardless of the language specifier (e.g., hcl, terraform, or empty).
-                    code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
+                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
                     
-                    if code_match:
-                        # If a code block is found, use its captured content.
-                        st.session_state.terraform_code = code_match.group(1).strip()
-                        st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
-                        st.session_state.raw_response_debug = "" # Clear debug if extraction was successful
-                    elif response_content:
-                        # Fallback: If content exists but no code block was detected, try to strip fences
-                        cleaned_content = response_content.strip()
-                        cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
-                        cleaned_content = re.sub(r'```$', '', cleaned_content)
-                        st.session_state.terraform_code = cleaned_content.strip()
-                        st.warning("⚠️ The AI response did not contain a standard markdown code block. Using the raw output.")
-                        st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
-                        st.session_state.raw_response_debug = f"Fallback Used: Raw content not code-fenced (Length: {len(response_content)}):\n{response_content}"
-                    else:
-                        # Case 3: API returned a truly empty response string
-                        st.session_state.terraform_code = "# AI returned no content. Please check your API key status or network connectivity."
-                        st.session_state.validation_result = "Failed to generate code."
-                        st.session_state.has_errors = True
-                        st.session_state.validated = False
-                        st.session_state.raw_response_debug = "API returned a truly empty content string. This indicates a likely API key or network issue, or the AI was blocked from responding."
-
-
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
-                    st.session_state.raw_response_debug = "Authentication failed. Check your API key."
                 except Exception as e:
-                    error_message = f"General API communication error: {e}"
-                    st.error(error_message)
-                    st.session_state.raw_response_debug = (
-                        f"{error_message}\n\n"
-                        f"Sanitized Prompt Sent to API (check for bad characters here):\n"
-                        f"--- START PROMPT ---\n{clean_prompt}\n--- END PROMPT ---"
-                    )
+                    st.error(f"An error occurred while communicating with OpenAI. This may be due to an environment/encoding issue: {e}")
             st.rerun()
 
 with btn_col2:
     validate_disabled = not st.session_state.terraform_code or st.session_state.terraform_code.startswith('#')
     if st.button("✅ Validate", disabled=validate_disabled, use_container_width=True):
         if not terraform_executable_path or not Path(terraform_executable_path).is_file():
-            st.error("Terraform executable is not available. Attempting to re-initialize...")
-            with st.spinner("Setting up Terraform again..."):
-                get_terraform_executable.clear()
-            st.rerun()
+            st.error("Terraform executable is not available. Check installation logs.")
         else:
             st.session_state.validated = True
             temp_dir = "terraform_project"
             os.makedirs(temp_dir, exist_ok=True)
+            
             with open(os.path.join(temp_dir, "main.tf"), "w") as f:
                 f.write(st.session_state.terraform_code)
             
             with st.spinner("Running `terraform init` and `validate`..."):
-                # Run init first to download providers
                 init_process = subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True)
                 
                 if init_process.returncode != 0:
                     st.session_state.validation_result = f"An error occurred during `terraform init`:\n{init_process.stderr}"
                     st.session_state.has_errors = True
                 else:
-                    # Run validate
                     validate_process = subprocess.run([terraform_executable_path, "validate", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
                     
                     if validate_process.returncode == 0:
@@ -284,14 +260,13 @@ with btn_col3:
             st.error("Cannot correct code. Please configure your OpenAI API key in the app secrets.")
         else:
             with st.spinner("AI is attempting to correct the code..."):
-                try:
-                    # --- SANITIZE CODE CONTENT HERE ---
-                    clean_code = sanitize_text(st.session_state.terraform_code)
-                    clean_result = sanitize_text(st.session_state.validation_result)
+                clean_code = sanitize_text(st.session_state.terraform_code)
+                clean_result = sanitize_text(st.session_state.validation_result)
 
+                try:
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
-                    # Using triple quotes for multi-line f-string.
+                    
                     correction_prompt = f"""**Terraform Code with Errors:**
 ```hcl
 {clean_code}
@@ -305,26 +280,16 @@ Please provide the corrected code."""
                     
                     completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": correction_prompt}])
                     
-                    if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
-                        st.error("API Error: Received an empty or malformed response from the OpenAI API during correction.")
-                        response_content = ""
+                    response_content = completion.choices[0].message.content if completion.choices and completion.choices[0].message else ""
+                    
+                    if response_content:
+                        st.session_state.terraform_code = extract_code_content(response_content)
+                        st.session_state.validation_result = "🔧 AI has attempted to correct the code. Please validate again."
                     else:
-                        response_content = completion.choices[0].message.content
-                    
-                    # Use a more forgiving regex to capture the code block content
-                    code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
-                    
-                    if code_match:
-                        st.session_state.terraform_code = code_match.group(1).strip()
-                    else:
-                        # Fallback: Use the entire response, but try to strip common fences
-                        cleaned_content = response_content.strip()
-                        cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
-                        cleaned_content = re.sub(r'```$', '', cleaned_content)
-                        st.session_state.terraform_code = cleaned_content.strip()
-                        st.warning("⚠️ The AI response did not contain a standard markdown code block. Using the raw output.")
-                    
-                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "🔧 AI has attempted to correct the code. Please validate again.", False, False
+                        st.error("The AI returned an empty response during correction.")
+
+                    st.session_state.has_errors, st.session_state.validated = False, False
+                
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
                 except Exception as e:
@@ -335,12 +300,6 @@ Please provide the corrected code."""
 with col_results:
     st.header("Results")
     
-    # Display raw response for debugging if extraction failed
-    if st.session_state.raw_response_debug:
-        st.subheader("⚠️ Raw Debug Response (API Output)")
-        st.info("The code box is empty because the AI failed to respond with a usable code block or the API call failed. This is the raw text (or error message) received:")
-        st.code(st.session_state.raw_response_debug, language="text")
-
     if st.session_state.validated:
         if st.session_state.has_errors:
             st.error("Validation Failed!")
