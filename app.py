@@ -49,7 +49,7 @@ def get_terraform_executable(version=TERRAFORM_VERSION):
         elif arch == "aarch64":
             arch = "arm64"
 
-        url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
+        url = f"[https://releases.hashicorp.com/terraform/](https://releases.hashicorp.com/terraform/){version}/terraform_{version}_{system}_{arch}.zip"
         
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -151,6 +151,13 @@ with col_editor:
 # --- Utility Function for Code Extraction ---
 def extract_code_content(response_content: str) -> str:
     """Extracts code content using a forgiving regex and aggressively cleans whitespace."""
+    
+    # CRITICAL FIX: Replace all non-standard whitespace (like \u00a0) with standard space
+    # in the ENTIRE response before attempting regex matching. This prevents malformed 
+    # delimiters like ` ```\u00a0hcl\n` from failing the match.
+    response_content = re.sub(r'[^\S\r\n\t]+', ' ', response_content)
+    
+    # Now attempt the regex match on the cleaned content
     code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
     
     if code_match:
@@ -165,9 +172,6 @@ def extract_code_content(response_content: str) -> str:
             # Only show warning if cleaning actually happened
             st.warning("⚠️ The AI response was not properly code-fenced. Using raw output.")
             
-    # CRITICAL FIX: Replace all non-standard whitespace (like \u00a0) with standard space.
-    content = re.sub(r'[^\S\r\n\t]+', ' ', content)
-    
     return content.strip()
 
 
