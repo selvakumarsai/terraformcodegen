@@ -36,7 +36,7 @@ def get_terraform_executable(version="1.8.5"):
         elif arch == "aarch64":
             arch = "arm64"
 
-        url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
+        url = f"[https://releases.hashicorp.com/terraform/](https://releases.hashicorp.com/terraform/){version}/terraform_{version}_{system}_{arch}.zip"
         
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -164,8 +164,15 @@ with btn_col1:
                     """
                     completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
                     response_content = completion.choices[0].message.content
-                    code_match = re.search(r'```hcl\n(.*?)\n```', response_content, re.DOTALL)
+                    
+                    # --- FIX APPLIED HERE ---
+                    # Use a more forgiving regex to capture the code block content, 
+                    # regardless of the language specifier (e.g., hcl, terraform, or empty).
+                    code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
+                    # If a code block is found, use its content; otherwise, use the entire response.
                     st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
+                    # --- END FIX ---
+                    
                     st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
@@ -189,12 +196,14 @@ with btn_col2:
                 f.write(st.session_state.terraform_code)
             
             with st.spinner("Running `terraform init` and `validate`..."):
+                # Run init first to download providers
                 init_process = subprocess.run([terraform_executable_path, "init", "-no-color", "-upgrade"], cwd=temp_dir, capture_output=True, text=True)
                 
                 if init_process.returncode != 0:
-                     st.session_state.validation_result = f"An error occurred during `terraform init`:\n{init_process.stderr}"
-                     st.session_state.has_errors = True
+                    st.session_state.validation_result = f"An error occurred during `terraform init`:\n{init_process.stderr}"
+                    st.session_state.has_errors = True
                 else:
+                    # Run validate
                     validate_process = subprocess.run([terraform_executable_path, "validate", "-no-color"], cwd=temp_dir, capture_output=True, text=True)
                     
                     if validate_process.returncode == 0:
@@ -214,31 +223,4 @@ with btn_col3:
                 try:
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
-                    correction_prompt = f"**Terraform Code with Errors:**\n```hcl\n{st.session_state.terraform_code}\n```\n\n**Validation Error:**\n```\n{st.session_state.validation_result}\n```\nPlease provide the corrected code."
-                    completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": correction_prompt}])
-                    response_content = completion.choices[0].message.content
-                    code_match = re.search(r'```hcl\n(.*?)\n```', response_content, re.DOTALL)
-                    st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
-                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "🔧 AI has attempted to correct the code. Please validate again.", False, False
-                except openai.AuthenticationError:
-                    st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
-                except Exception as e:
-                    st.error(f"An error occurred during correction: {e}")
-            st.rerun()
-
-# --- Display Results Area ---
-with col_results:
-    st.header("Results")
-    if st.session_state.validated:
-        if st.session_state.has_errors:
-            st.error("Validation Failed!")
-            st.write("`<validation_result>`")
-            st.code(st.session_state.validation_result, language="bash")
-            st.write("`</validation_result>`")
-        else:
-            st.success("Validation Successful!")
-            st.write("`<validation_result>`")
-            st.code(st.session_state.validation_result, language="bash")
-            st.write("`</validation_result>`")
-    else:
-        st.info("Generate and validate code to see the results here.")
+                    correction_prompt = f"**Terraform Code with Errors:**\n
