@@ -103,6 +103,8 @@ if 'has_errors' not in st.session_state:
     st.session_state.has_errors = False
 if 'validated' not in st.session_state:
     st.session_state.validated = False
+if 'raw_api_dump' not in st.session_state:
+    st.session_state.raw_api_dump = ""
 
 # --- Sidebar ---
 with st.sidebar:
@@ -179,6 +181,7 @@ with btn_col1:
             with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
                 clean_prompt = sanitize_text(user_prompt)
                 response_content = ""
+                st.session_state.raw_api_dump = "Attempting API call..." # Set pre-call status
                 try:
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = f"""
@@ -203,25 +206,28 @@ with btn_col1:
                                 ]
                             )
                             response_content = completion.choices[0].message.content
+                            st.session_state.raw_api_dump = f"RAW CONTENT RECEIVED (Length: {len(response_content)}):\n{response_content}"
                             break # Success, exit retry loop
-                        except Exception:
+                        except Exception as e:
                             if i < 2:
                                 time.sleep(2 ** i) # Wait 1s, then 2s
                             else:
-                                raise # Re-raise error on final attempt
+                                raise e # Re-raise error on final attempt
 
                     if response_content:
                         st.session_state.terraform_code = extract_code_content(response_content)
                     else:
-                        st.error("The AI returned an empty response. Please try again.")
+                        st.error("The AI returned an empty response. Please check the Debug Panel for details.")
                         st.session_state.terraform_code = "# AI returned no content."
                         
                     st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
                     
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
+                    st.session_state.raw_api_dump = "Authentication failed. Check your API key."
                 except Exception as e:
                     st.error(f"An error occurred while communicating with OpenAI. This may be due to an environment/encoding issue: {e}")
+                    st.session_state.raw_api_dump = f"ERROR DUMP:\n{e}\n\nSanitized Prompt Sent:\n{clean_prompt}"
             st.rerun()
 
 with btn_col2:
@@ -300,6 +306,12 @@ Please provide the corrected code."""
 with col_results:
     st.header("Results")
     
+    with st.expander("🛠️ DEBUG: Raw API Response"):
+        if st.session_state.raw_api_dump:
+            st.code(st.session_state.raw_api_dump, language="text")
+        else:
+            st.info("The raw API response will appear here after clicking 'Generate with AI'.")
+
     if st.session_state.validated:
         if st.session_state.has_errors:
             st.error("Validation Failed!")
