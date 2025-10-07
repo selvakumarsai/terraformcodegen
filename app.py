@@ -117,6 +117,8 @@ if 'has_errors' not in st.session_state:
     st.session_state.has_errors = False
 if 'validated' not in st.session_state:
     st.session_state.validated = False
+if 'raw_response_debug' not in st.session_state: # NEW: Debug state for raw API response
+    st.session_state.raw_response_debug = ""
 
 # --- Main App Layout ---
 col_editor, col_results = st.columns(2)
@@ -144,6 +146,8 @@ btn_col1, btn_col2, btn_col3 = st.columns(3)
 
 with btn_col1:
     if st.button("🚀 Generate with AI", use_container_width=True, type="primary"):
+        st.session_state.raw_response_debug = "" # Clear debug flag before new run
+        
         if not openai_api_key:
             st.error("Cannot generate code. Please configure your OpenAI API key in the app secrets.")
         elif not user_prompt:
@@ -167,9 +171,11 @@ with btn_col1:
                     if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
                         st.error("API Error: Received an empty or malformed response from the OpenAI API.")
                         response_content = ""
+                        st.session_state.raw_response_debug = "API returned an empty or malformed completion object."
                     else:
                         response_content = completion.choices[0].message.content
-                    
+                        st.session_state.raw_response_debug = response_content # Store raw response for debug
+
                     # Use a more forgiving regex to capture the code block content, 
                     # regardless of the language specifier (e.g., hcl, terraform, or empty).
                     code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
@@ -178,9 +184,9 @@ with btn_col1:
                         # If a code block is found, use its captured content.
                         st.session_state.terraform_code = code_match.group(1).strip()
                         st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
+                        st.session_state.raw_response_debug = "" # Clear debug if extraction was successful
                     elif response_content:
                         # Fallback: If content exists but no code block was detected, try to strip fences
-                        # and warn the user that the AI did not format correctly.
                         cleaned_content = response_content.strip()
                         cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
                         cleaned_content = re.sub(r'```$', '', cleaned_content)
@@ -195,8 +201,10 @@ with btn_col1:
 
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
+                    st.session_state.raw_response_debug = "Authentication failed. Check your API key."
                 except Exception as e:
                     st.error(f"An error occurred while communicating with OpenAI: {e}")
+                    st.session_state.raw_response_debug = f"General API communication error: {e}"
             st.rerun()
 
 with btn_col2:
@@ -285,6 +293,13 @@ Please provide the corrected code."""
 # --- Display Results Area ---
 with col_results:
     st.header("Results")
+    
+    # NEW: Display raw response for debugging if extraction failed
+    if st.session_state.raw_response_debug:
+        st.subheader("⚠️ Raw Debug Response (API Output)")
+        st.info("The code box is empty because the AI failed to respond with a usable code block or the API call failed. This is the raw text (or error message) received:")
+        st.code(st.session_state.raw_response_debug, language="text")
+
     if st.session_state.validated:
         if st.session_state.has_errors:
             st.error("Validation Failed!")
