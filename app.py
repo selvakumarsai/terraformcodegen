@@ -9,6 +9,24 @@ import platform
 import stat
 from pathlib import Path
 
+# --- Content Sanitization Function ---
+def sanitize_text(text):
+    """
+    Replaces common Unicode smart quotes and dashes with ASCII equivalents,
+    and then strips any remaining non-ASCII characters to prevent encoding errors.
+    """
+    if not isinstance(text, str):
+        return ""
+    
+    # 1. Explicitly replace common smart quotes and dashes (fixes the specific error: \u201c)
+    text = text.replace('“', '"').replace('”', '"') # Left/Right double quote
+    text = text.replace('‘', "'").replace('’', "'") # Left/Right single quote (apostrophe)
+    text = text.replace('—', '--').replace('–', '-') # Em dash/En dash
+    
+    # 2. Aggressively strip all remaining non-ASCII characters
+    return text.encode('ascii', 'ignore').decode('ascii')
+
+
 # --- App Title and Description ---
 st.set_page_config(layout="wide")
 st.title("☁️ Terraform Code Assistant")
@@ -155,9 +173,8 @@ with btn_col1:
         else:
             with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
                 try:
-                    # --- FIX: Robustly strip all non-ASCII characters to prevent codec errors ---
-                    # This ensures the prompt only contains characters safe for JSON serialization in the API client.
-                    clean_prompt = user_prompt.encode('ascii', 'ignore').decode('ascii')
+                    # --- SANITIZE USER INPUT HERE ---
+                    clean_prompt = sanitize_text(user_prompt)
                     
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = f"""
@@ -258,9 +275,9 @@ with btn_col3:
         else:
             with st.spinner("AI is attempting to correct the code..."):
                 try:
-                    # --- FIX: Robustly strip all non-ASCII characters from input content ---
-                    clean_code = st.session_state.terraform_code.encode('ascii', 'ignore').decode('ascii')
-                    clean_result = st.session_state.validation_result.encode('ascii', 'ignore').decode('ascii')
+                    # --- SANITIZE CODE CONTENT HERE ---
+                    clean_code = sanitize_text(st.session_state.terraform_code)
+                    clean_result = sanitize_text(st.session_state.validation_result)
 
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
