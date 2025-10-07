@@ -49,7 +49,8 @@ def get_terraform_executable(version=TERRAFORM_VERSION):
         elif arch == "aarch64":
             arch = "arm64"
 
-        url = f"[https://releases.hashicorp.com/terraform/](https://releases.hashicorp.com/terraform/){version}/terraform_{version}_{system}_{arch}.zip"
+        # FIX: Removed markdown formatting from the URL string
+        url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
         
         response = requests.get(url, stream=True)
         response.raise_for_status()
