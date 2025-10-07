@@ -203,8 +203,7 @@ with btn_col1:
                         st.session_state.raw_response_debug = "API returned an empty or malformed completion object."
                     else:
                         response_content = completion.choices[0].message.content
-                        st.session_state.raw_response_debug = response_content # Store raw response for debug
-
+                        
                     # Use a more forgiving regex to capture the code block content, 
                     # regardless of the language specifier (e.g., hcl, terraform, or empty).
                     code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
@@ -222,11 +221,15 @@ with btn_col1:
                         st.session_state.terraform_code = cleaned_content.strip()
                         st.warning("⚠️ The AI response did not contain a standard markdown code block. Using the raw output.")
                         st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "", False, False
+                        st.session_state.raw_response_debug = f"Fallback Used: Raw content not code-fenced (Length: {len(response_content)}):\n{response_content}"
                     else:
-                        st.session_state.terraform_code = "# AI returned no content."
+                        # Case 3: API returned a truly empty response string
+                        st.session_state.terraform_code = "# AI returned no content. Please check your API key status or network connectivity."
                         st.session_state.validation_result = "Failed to generate code."
                         st.session_state.has_errors = True
                         st.session_state.validated = False
+                        st.session_state.raw_response_debug = "API returned a truly empty content string. This indicates a likely API key or network issue, or the AI was blocked from responding."
+
 
                 except openai.AuthenticationError:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
