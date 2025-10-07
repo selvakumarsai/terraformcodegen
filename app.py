@@ -36,7 +36,7 @@ def get_terraform_executable(version="1.8.5"):
         elif arch == "aarch64":
             arch = "arm64"
 
-        url = f"[https://releases.hashicorp.com/terraform/](https://releases.hashicorp.com/terraform/){version}/terraform_{version}_{system}_{arch}.zip"
+        url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
         
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -223,4 +223,46 @@ with btn_col3:
                 try:
                     client = openai.OpenAI(api_key=openai_api_key)
                     system_prompt = "You are a Terraform code correction expert. The user will provide HCL code and a validation error. Fix the code to resolve the error. Only return the complete, corrected HCL code block without explanations."
-                    correction_prompt = f"**Terraform Code with Errors:**\n
+                    # FIX: Changed to triple quotes for a multi-line f-string.
+                    correction_prompt = f"""**Terraform Code with Errors:**
+```hcl
+{st.session_state.terraform_code}
+```
+
+**Validation Error:**
+```
+{st.session_state.validation_result}
+```
+Please provide the corrected code."""
+                    
+                    completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": correction_prompt}])
+                    response_content = completion.choices[0].message.content
+                    
+                    # --- FIX APPLIED HERE ---
+                    code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
+                    st.session_state.terraform_code = code_match.group(1).strip() if code_match else response_content.strip()
+                    # --- END FIX ---
+                    
+                    st.session_state.validation_result, st.session_state.has_errors, st.session_state.validated = "🔧 AI has attempted to correct the code. Please validate again.", False, False
+                except openai.AuthenticationError:
+                    st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
+                except Exception as e:
+                    st.error(f"An error occurred during correction: {e}")
+            st.rerun()
+
+# --- Display Results Area ---
+with col_results:
+    st.header("Results")
+    if st.session_state.validated:
+        if st.session_state.has_errors:
+            st.error("Validation Failed!")
+            st.write("`<validation_result>`")
+            st.code(st.session_state.validation_result, language="bash")
+            st.write("`</validation_result>`")
+        else:
+            st.success("Validation Successful!")
+            st.write("`<validation_result>`")
+            st.code(st.session_state.validation_result, language="bash")
+            st.write("`</validation_result>`")
+    else:
+        st.info("Generate and validate code to see the results here.")
