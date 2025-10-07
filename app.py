@@ -150,22 +150,25 @@ with col_editor:
 
 # --- Utility Function for Code Extraction ---
 def extract_code_content(response_content: str) -> str:
-    """Extracts code content using a forgiving regex."""
+    """Extracts code content using a forgiving regex and aggressively cleans whitespace."""
     code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
     
     if code_match:
-        return code_match.group(1).strip()
+        content = code_match.group(1)
     else:
         # Fallback: Strip fences and use raw content
-        cleaned_content = response_content.strip()
-        cleaned_content = re.sub(r'^```[a-zA-Z]*\s*', '', cleaned_content)
-        cleaned_content = re.sub(r'```$', '', cleaned_content)
+        content = response_content.strip()
+        content = re.sub(r'^```[a-zA-Z]*\s*', '', content)
+        content = re.sub(r'```$', '', content)
         
-        if cleaned_content != response_content.strip():
+        if content != response_content.strip():
             # Only show warning if cleaning actually happened
             st.warning("⚠️ The AI response was not properly code-fenced. Using raw output.")
             
-        return cleaned_content.strip()
+    # CRITICAL FIX: Replace all non-standard whitespace (like \u00a0) with standard space.
+    content = re.sub(r'[^\S\r\n\t]+', ' ', content)
+    
+    return content.strip()
 
 
 # --- Action Buttons ---
