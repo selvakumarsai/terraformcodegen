@@ -50,7 +50,7 @@ def get_terraform_executable(version=TERRAFORM_VERSION):
             arch = "arm64"
 
         # FIX: Removed markdown formatting from the URL string
-        url = f"https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{system}_{arch}.zip"
+        url = f"[https://releases.hashicorp.com/terraform/](https://releases.hashicorp.com/terraform/){version}/terraform_{version}_{system}_{arch}.zip"
         
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -153,26 +153,29 @@ with col_editor:
 def extract_code_content(response_content: str) -> str:
     """Extracts code content using a forgiving regex and aggressively cleans whitespace."""
     
-    # CRITICAL FIX: Replace all non-standard whitespace (like \u00a0) with standard space
-    # in the ENTIRE response before attempting regex matching. This prevents malformed 
-    # delimiters like ` ```\u00a0hcl\n` from failing the match.
+    # CRITICAL FIX 1: Replace all non-standard whitespace (like \u00a0) with standard space
+    # in the ENTIRE response. This ensures the delimiters are clean for matching.
     response_content = re.sub(r'[^\S\r\n\t]+', ' ', response_content)
     
-    # Now attempt the regex match on the cleaned content
-    code_match = re.search(r'```[a-zA-Z]*\n(.*?)\n```', response_content, re.DOTALL)
+    # CRITICAL FIX 2: Use a more flexible regex that allows optional whitespace (\s*)
+    # between the language tag and the actual code content.
+    # We use re.DOTALL to ensure .*? captures content across multiple lines.
+    code_match = re.search(r'```[a-zA-Z]*\s*(.*?)\s*```', response_content, re.DOTALL)
     
     if code_match:
         content = code_match.group(1)
     else:
-        # Fallback: Strip fences and use raw content
+        # Fallback: Strip fences and use raw content.
         content = response_content.strip()
-        content = re.sub(r'^```[a-zA-Z]*\s*', '', content)
-        content = re.sub(r'```$', '', content)
+        # Use count=1 to ensure we only strip the first and last fences, even if 
+        # the code contains a string literal with triple backticks.
+        content = re.sub(r'^```[a-zA-Z]*\s*', '', content, 1) 
+        content = re.sub(r'```$', '', content, 1)
         
         if content != response_content.strip():
-            # Only show warning if cleaning actually happened
             st.warning("⚠️ The AI response was not properly code-fenced. Using raw output.")
             
+    # CRITICAL FIX 3: Final cleanup of residual newline/whitespace issues
     return content.strip()
 
 
