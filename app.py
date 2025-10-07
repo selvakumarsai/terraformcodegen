@@ -1,3 +1,4 @@
+import streamlit as st
 import subprocess
 import os
 import re
@@ -163,16 +164,11 @@ with btn_col1:
                     """
                     completion = client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}])
                     
-                    # --- DEBUGGING STEP 1: Check for successful response content ---
                     if not (completion.choices and completion.choices[0].message and completion.choices[0].message.content):
                         st.error("API Error: Received an empty or malformed response from the OpenAI API.")
                         response_content = ""
                     else:
                         response_content = completion.choices[0].message.content
-                    
-                    st.subheader("Raw AI Response (for debugging):")
-                    st.code(response_content, language="markdown")
-                    # --- END DEBUGGING STEP 1 ---
                     
                     # Use a more forgiving regex to capture the code block content, 
                     # regardless of the language specifier (e.g., hcl, terraform, or empty).
