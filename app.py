@@ -172,6 +172,8 @@ with btn_col1:
             st.warning("Please describe the infrastructure you want to generate.")
         else:
             with st.spinner(f"AI is generating Terraform code for {cloud_provider}..."):
+                # Define clean_prompt outside the try block for error reporting
+                clean_prompt = ""
                 try:
                     # --- SANITIZE USER INPUT HERE ---
                     clean_prompt = sanitize_text(user_prompt)
@@ -230,8 +232,13 @@ with btn_col1:
                     st.error("Authentication Error: The OpenAI API key is invalid or has expired.")
                     st.session_state.raw_response_debug = "Authentication failed. Check your API key."
                 except Exception as e:
-                    st.error(f"An error occurred while communicating with OpenAI: {e}")
-                    st.session_state.raw_response_debug = f"General API communication error: {e}"
+                    error_message = f"General API communication error: {e}"
+                    st.error(error_message)
+                    st.session_state.raw_response_debug = (
+                        f"{error_message}\n\n"
+                        f"Sanitized Prompt Sent to API (check for bad characters here):\n"
+                        f"--- START PROMPT ---\n{clean_prompt}\n--- END PROMPT ---"
+                    )
             st.rerun()
 
 with btn_col2:
